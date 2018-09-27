@@ -16,7 +16,7 @@ def mandelbrot(c,maxiter):
             return n
     return 0
 
-@guvectorize([(complex64[:], int32[:], int32[:])], '(n),()->(n)',target='parallel')
+@guvectorize([(complex64[:], int32[:], int32[:])], '(n),()->(n)',target='cpu')
 def mandelbrot_numpy(c, maxit, output):
     maxiter = maxit[0]
     for i in range(c.shape[0]):
@@ -32,10 +32,36 @@ def mandelbrot_set2(xmin,xmax,ymin,ymax,width=256,height=256,maxiter=100):
     print("fro")
     return n3.T
 
-from flask import Flask
-app = Flask(__name__)
+# from https://github.com/numba/numba/issues/2554
+from numba import double, guvectorize
+import numpy as np
 
-@app.route("/")
-def hello():
-    ret = mandelbrot_set2(-0.74877,-0.74872,0.06505,0.06510,256,256,100)
-    return "Hello World! {}".format([str(s) for s in ret])
+@guvectorize([
+    (complex64[:], int32[:], int32[:]),
+], '(n),()->(n)', target='cpu')
+def gufunc(x, y, out):
+    maxiter = y[0]
+
+    for i in range(x.shape[0]):
+        out[i] = mandelbrot(x[i], maxiter)
+
+def mandelbrot_set2(xmin,xmax,ymin,ymax,width=256,height=256,maxiter=100):
+    r1 = np.linspace(xmin, xmax, width, dtype=np.float32)
+    r2 = np.linspace(ymin, ymax, height, dtype=np.float32)
+    c = r1 + r2[:,None]*1j
+
+    n3 = gufunc(c, maxiter)
+    return n3.T
+
+from flask import Flask
+
+def create_app():
+    app = Flask(__name__)
+
+    @app.route("/")
+    def hello():
+        ret = mandelbrot_set2(-0.74877,-0.74872,0.06505,0.06510,256,256,100)
+        #ret = gufunc([-0.74877,-0.74872,0.06505,0.06510,256,256,100])
+        return "Hello World! {}".format([str(s) for s in ret])
+
+    return app
